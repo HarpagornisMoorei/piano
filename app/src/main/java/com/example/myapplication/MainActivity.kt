@@ -52,7 +52,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.leff.midi.MidiFile
 import com.leff.midi.MidiTrack
- import com.leff.midi.event.meta.Tempo
+import com.leff.midi.event.meta.Tempo
 import com.leff.midi.event.meta.TimeSignature
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -104,10 +104,19 @@ import okhttp3.RequestBody
 import androidx.lifecycle.lifecycleScope
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
+import kotlin.Boolean
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
+fun main(cpp: cpp){
+    cpp.sequencer(false); Int
+}
 val size =43844 * 4   // 43844 samples × 4 bytes/float = 175376 bytes (your "30 bytes")
 val step = 36164 * 4
 val padBytes = 3840
+val speed=10
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TikWmResponse(
 
@@ -125,13 +134,30 @@ data class Note(
 data class pianoNote( //x and y trandlation
     var isWhite: Boolean?,
     var offset: Int?,
-    var time: Int?
+    var time: Int?,
+    var play: Boolean?,
 )
 data class fallingNote(
     var note: Int?,
-    var time: Long?
-)
+    var time: Long?,
+    var level: Int?,
 
+
+    )
+val pianoNotes =mutableStateListOf<Note>().apply {
+    addAll(List(88) { Note(
+        play = false,
+        music = false
+    ) })}
+fun dumpMidi(file: File) {
+    val midi = file.inputStream().use { MidiFile(it) }
+    Log.d("midiifo","PPQN=${midi.resolution}  format=${midi.type}  tracks=${midi.tracks.size}")
+    for (track in midi.tracks) {
+        for (e in track.events) {
+            if (e is Tempo) Log.d("midiifo", "tick=${e.tick}  tempo=${e.bpm} bpm")
+        }
+    }
+}
 class advancedCon : ViewModel(){
     private val spaceUrl:String="https://qx32account-midiapp.hf.space"
     private val hfToken: String?="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"
@@ -195,7 +221,7 @@ class advancedCon : ViewModel(){
 
         client.newCall(req).execute().use {resp -> check(resp.isSuccessful
         ){"download fail:${resp.code}"}
-        dest.outputStream().use{ resp.body!!.byteStream().copyTo(it)}
+            dest.outputStream().use{ resp.body!!.byteStream().copyTo(it)}
         }
         dest
     }
@@ -216,7 +242,7 @@ class Transcriber(
 }
 class cpp(): ViewModel(){
     external fun sequencer(isPlaying: Boolean): Int
-    external fun play();
+    external fun play(freq: Int, level: Int): Int
 
     companion object {
         init {
@@ -225,32 +251,138 @@ class cpp(): ViewModel(){
     }
 }
 class converter(application: Application) : AndroidViewModel(application) {
-    var url  by mutableStateOf("")
-    var isAdvanced  by mutableStateOf(false)
+    var url by mutableStateOf("")
+    var isAdvanced by mutableStateOf(false)
+
     // 2. Android safely encodes the symbols so the API can read it seamlessly
     var isMidiReady by mutableStateOf(false)
-    val encodedUrl by derivedStateOf {  Uri.encode(url)}
-    val finalApiUrl  by derivedStateOf {  "https://www.tikwm.com/api/?url=$encodedUrl"}
-    var input= "/data/data/com.example.myapplication/files/Folder/pikachu.mp3"
+    val encodedUrl by derivedStateOf { Uri.encode(url) }
+    val finalApiUrl by derivedStateOf { "https://www.tikwm.com/api/?url=$encodedUrl" }
+    var input = "/data/data/com.example.myapplication/files/Folder/pikachu.mp3"
 
-    var output= "/data/data/com.example.myapplication/files/Folder/pikachu.wav"
-    var rawFilePath ="/data/data/com.example.myapplication/files/Folder/rawFile.raw"
+    var output = "/data/data/com.example.myapplication/files/Folder/pikachu.wav"
+    var rawFilePath = "/data/data/com.example.myapplication/files/Folder/rawFile.raw"
 
     val file = File(input)
     val midiFile = File(getApplication<Application>().cacheDir, "info.mid")
-    var rawFile =File(rawFilePath)
-    val itemCount =mutableStateListOf<pianoNote>()
-    var noteFrames= floatArrayOf()
-    var onsetFrames= floatArrayOf()
-    var  convertedLastVal =0
+    var rawFile = File(rawFilePath)
+    val itemCount = mutableStateListOf<pianoNote>() //piano roll
+    val currentlyPlayedId = mutableListOf<Int>()
+    var noteFrames = floatArrayOf()
+    var onsetFrames = floatArrayOf()
+    var convertedLastVal = 0
     var everythingReady by mutableStateOf(false)
+    var milli=0
 
-    val pianoNotes =mutableStateListOf<Note>().apply {
-        addAll(List(88) { Note(
-            play = false,
-            music = false
-        ) })}
-    val fallingNoteCount =mutableStateListOf<fallingNote>()
+    val fallingNoteCount = mutableStateListOf<fallingNote>()
+    fun drawPiano() {
+        var currentId = 0
+        var offset =0
+        itemCount.add(pianoNote(
+            isWhite = true,
+            offset = offset,
+            time = 10,
+            play = false
+        ))
+        currentId += 1
+        offset += 5
+        itemCount.add(pianoNote(
+            isWhite = false,
+            offset = offset,
+            time = 10,
+            play = false
+        ))
+        currentId += 1
+        offset += 5
+        itemCount.add(pianoNote(
+            isWhite = true,
+            offset = offset,
+            time = 10,
+            play = false
+        ))
+        for (o in 1..7) { //octave
+            for (k in 1..2) { //key groups
+                currentId += 1
+                offset += 5
+                itemCount.add(
+                    pianoNote(
+                        isWhite = true,
+                        offset = offset,
+                        time = 10,
+                        play = false
+                    )
+                )
+                currentId += 1
+                offset += 5
+                itemCount.add(
+                    pianoNote(
+                        isWhite = false,
+                        offset = offset,
+                        time = 10,
+                        play = false
+                    )
+                )
+            }
+            currentId += 1
+            offset += 5
+            itemCount.add(
+                pianoNote(
+                    isWhite = true,
+                    offset = offset,
+                    time = 10,
+                    play = false
+                )
+            )
+
+
+
+
+            for (k in 0..2) {
+                currentId += 1
+                offset += 5
+                itemCount.add(
+                    pianoNote(
+                        isWhite = true,
+                        offset = offset,
+                        time = 10,
+                        play = false
+                    )
+                )
+                currentId += 1
+                offset += 5
+                itemCount.add(
+                    pianoNote(
+                        isWhite = false,
+                        offset = offset,
+                        time = 10,
+                        play = false
+                    )
+                )
+            }
+            currentId += 1
+            offset += 5
+            itemCount.add(
+                pianoNote(
+                    isWhite = true,
+                    offset = offset,
+                    time = 10,
+                    play = false
+                )
+            )
+        }
+        currentId += 1
+        offset += 5
+        itemCount.add(pianoNote(
+            isWhite = true,
+            offset = 435,
+            time = 10,
+            play = false
+        ))
+
+
+    }
+
+
 
 
     suspend fun saveFileData(context: Context,myViewModel: converter) {
@@ -266,274 +398,281 @@ class converter(application: Application) : AndroidViewModel(application) {
 
         return withContext(Dispatchers.IO) { //executes the code block on a different thread, and returns right back to the original thread when finished
 
-                val response: Response = okHttpClient.newCall(request)
-                    .execute() //engine client prepares a methog that prepares my request then executes it
+            val response: Response = okHttpClient.newCall(request)
+                .execute() //engine client prepares a methog that prepares my request then executes it
 
 
-                val jsonStream = response.body?.string() ?: "" //gets link
-                val readJson: TikWmResponse = mapper.readValue(jsonStream)
-                val trueLink = readJson.data?.music
+            val jsonStream = response.body?.string() ?: "" //gets link
+            val readJson: TikWmResponse = mapper.readValue(jsonStream)
+            val trueLink = readJson.data?.music
 
-                if (!trueLink.isNullOrEmpty()) {
-                    Log.d("https", "link recieved")
-                    val requestVideo = Request.Builder()
-                        .url(trueLink)
-                        .build()
+            if (!trueLink.isNullOrEmpty()) {
+                Log.d("https", "link recieved")
+                val requestVideo = Request.Builder()
+                    .url(trueLink)
+                    .build()
 
-                    val path = File(context.filesDir.toString() + "/Folder")
+                val path = File(context.filesDir.toString() + "/Folder")
 
-                    if (!path.exists())
-                        path.mkdirs()
+                if (!path.exists())
+                    path.mkdirs()
 
-                    val imageFile = File(path, "pikachu.mp3")
-                    if (imageFile.exists()) {
+                val imageFile = File(path, "pikachu.mp3")
+                if (imageFile.exists()) {
 
-                    }
-                    val responseVideo: Response = okHttpClient.newCall(requestVideo).execute()
+                }
+                val responseVideo: Response = okHttpClient.newCall(requestVideo).execute()
 
-                    val inputStream = responseVideo.body?.byteStream()
-                    val imageFilePath = imageFile.toURI().toString()
-                    val fos = FileOutputStream(imageFile)
-                    Log.d("https", "downloaded")
-                    fos.write(inputStream?.readBytes())
-                    fos.flush()
-                    fos.close() //dnc
-                    FFmpegKit.executeAsync("-y -i  $input $output") { session ->
+                val inputStream = responseVideo.body?.byteStream()
+                val imageFilePath = imageFile.toURI().toString()
+                val fos = FileOutputStream(imageFile)
+                Log.d("https", "downloaded")
+                fos.write(inputStream?.readBytes())
+                fos.flush()
+                fos.close() //dnc
+                FFmpegKit.executeAsync("-y -i  $input $output") { session ->
 
-                        if (ReturnCode.isSuccess(session.returnCode)) {
-                            viewModelScope.launch {
-                                if (!isAdvanced) {
-                                    simpleConvert(context, myViewModel)
-                                } else {
-                                    advancedConvert(context.cacheDir, myViewModel)
-                                }
+                    if (ReturnCode.isSuccess(session.returnCode)) {
+                        viewModelScope.launch {
+                            if (!isAdvanced) {
+
+                                simpleConvert(context, myViewModel)
+                            } else {
+                                Log.d("debugh", "done")
+                                advancedConvert(context.cacheDir, myViewModel)
                             }
                         }
-                    }}
                     }
+                }}
+        }
 
-            }}
+    }}
 suspend fun advancedConvert(cacheDir: File,myViewModel: converter) = withContext(Dispatchers.IO) {
-
+    Log.d("debugh", "done")
 
 
     try {
-       val client= advancedCon()
+        val client= advancedCon()
 
         val transcriber by lazy { Transcriber(client,cacheDir) }
         // Now you can call suspend functions directly!
         val midi = transcriber.transcribe(File(myViewModel.output), cacheDir)
-
+        Log.d("debugh", "ready1")
 
         withContext(Dispatchers.Main) {
+
             myViewModel.isMidiReady = true
             myViewModel.everythingReady = true
+            Log.d("debugh", "ready")
+            dumpMidi(myViewModel.midiFile)
         }
     } catch (e: Exception) {
         Log.e("MIDI_CONVERT", "Advanced conversion failed", e)
     }
 }
-    fun simpleConvert(context: Context,myViewModel: converter) {
+fun simpleConvert(context: Context,myViewModel: converter) {
 
 
-                if (myViewModel.file.exists()) {
-                    Log.d("MIDI", "Actual model array size is")
+    if (myViewModel.file.exists()) {
+        Log.d("MIDI", "Actual model array size is")
 
-                    FFmpegKit.execute("-y -i ${myViewModel.output} -ac 1 -ar 22050 -f f32le ${myViewModel.rawFilePath}")
-                    val bufferSize = 43844 * 4
-                    val model = Nmp.newInstance(context)
+        FFmpegKit.execute("-y -i ${myViewModel.output} -ac 1 -ar 22050 -f f32le ${myViewModel.rawFilePath}")
+        val bufferSize = 43844 * 4
+        val model = Nmp.newInstance(context)
 
-                    try {
-                        RandomAccessFile(myViewModel.rawFilePath, "r").use { stream ->
-                            Log.d("MIDI", "Actual model array size is")
-                            var pointer = -padBytes * 4L
+        try {
+            RandomAccessFile(myViewModel.rawFilePath, "r").use { stream ->
+                Log.d("MIDI", "Actual model array size is")
+                var pointer = -padBytes * 4L
 
-                            var bufferOffset = 0
-                            bufferOffset += bufferSize
-                            var timeframe = 0
-                            val fileLength = myViewModel.rawFile.length()
-                            var globalFrameIndex = 0
+                var bufferOffset = 0
+                bufferOffset += bufferSize
+                var timeframe = 0
+                val fileLength = myViewModel.rawFile.length()
+                var globalFrameIndex = 0
 
-                            val tempoTrack = MidiTrack()
-                            val noteTrack = MidiTrack()
+                val tempoTrack = MidiTrack()
+                val noteTrack = MidiTrack()
 
-                            while (pointer < fileLength) {
-                                val bytes = ByteArray(175376)
-                                val readStart = maxOf(pointer, 0L)
-                                val skipInBuffer = (readStart - pointer).toInt()
-                                timeframe += 1
-                                if (readStart < fileLength) {
-                                    stream.seek(readStart)
-                                    val maxReadable =
-                                        minOf(
-                                            175376 - skipInBuffer,
-                                            (fileLength - readStart).toInt()
+                while (pointer < fileLength) {
+                    val bytes = ByteArray(175376)
+                    val readStart = maxOf(pointer, 0L)
+                    val skipInBuffer = (readStart - pointer).toInt()
+                    timeframe += 1
+                    if (readStart < fileLength) {
+                        stream.seek(readStart)
+                        val maxReadable =
+                            minOf(
+                                175376 - skipInBuffer,
+                                (fileLength - readStart).toInt()
+                            )
+                        stream.read(bytes, skipInBuffer, maxReadable)
+                    }
+                    val ByteBuffer =
+                        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+
+                    val inputFeature0 = TensorBuffer.createFixedSize(
+                        intArrayOf(1, 43844, 1),
+                        DataType.FLOAT32
+                    )
+                    inputFeature0.loadBuffer(ByteBuffer)
+                    val outputs = model.process(inputFeature0)
+
+                    val noteFrames = outputs.outputFeature0AsTensorBuffer
+                    val rawDataNote = noteFrames.floatArray
+                    myViewModel.noteFrames = rawDataNote
+                    val onsetFrames = outputs.outputFeature1AsTensorBuffer
+                    val rawDataonset = onsetFrames.floatArray
+                    myViewModel.onsetFrames = rawDataonset
+                    val contourFrames = outputs.outputFeature2AsTensorBuffer
+                    val outputArray = noteFrames.floatArray
+                    val onsetArray = onsetFrames.floatArray
+                    Log.d("SECOND", "$timeframe")
+
+                    Log.d(
+                        "MIDI_DEBUG",
+                        "Actual model array size is: ${outputArray.size}"
+                    )
+
+
+                    val ts = TimeSignature()
+                    ts.setTimeSignature(
+                        4,
+                        4,
+                        TimeSignature.DEFAULT_METER,
+                        TimeSignature.DEFAULT_DIVISION
+                    )
+                    val tempo = Tempo()
+                    tempo.setBpm(120f)
+                    tempoTrack.insertEvent(ts);
+                    tempoTrack.insertEvent(tempo);
+                    var seconds = 0
+                    seconds += 1
+                    val channel = 0
+
+                    for (timeIndex in 15 until 157) {
+                        for (pianoKeyIndex in 0 until 88) {
+                            val noteLocation = (timeIndex * 88) + pianoKeyIndex
+
+                            val pitch = pianoKeyIndex + 22
+                            val velocity = 100
+                            val tick = (globalFrameIndex.toLong() * 11L)
+                            val duration: Long = 120
+                            // FIXED: Use noteLocation instead of just pianoKeyIndex!
+                            val confidence = outputArray[noteLocation]
+                            val onset = onsetArray[noteLocation]
+                            val Level = onset * 127
+
+                            // 1. Ensure we aren't on the very first time frame to avoid out-of-bounds errors
+                            val isPeak = if (timeIndex > 15) {
+                                val lastFrameLocation = noteLocation - 88
+                                confidence - outputArray[lastFrameLocation].toDouble() > 0.16
+
+
+                            } else {
+                                true // On the first frame, treat it as a peak if it clears the threshold
+                            }
+                            val isNotPeak = if (timeIndex > 15) {
+                                val lastFrameLocation = noteLocation - 88
+                                confidence - outputArray[lastFrameLocation].toDouble() < -0.16
+
+
+                            } else {
+                                true // On the first frame, treat it as a peak if it clears the threshold
+                            }
+                            if (confidence > 0.5f && isPeak) {
+
+                                if (pianoNotes[pianoKeyIndex].play == false) {
+                                    pianoNotes[pianoKeyIndex].play = true
+                                    noteTrack.insertEvent(
+                                        com.leff.midi.event.NoteOn(
+                                            tick,
+                                            channel,
+                                            pitch,
+                                            100
                                         )
-                                    stream.read(bytes, skipInBuffer, maxReadable)
+                                    )
+                                    Log.d(
+                                        "MIDI",
+                                        " $pianoKeyIndex,$timeIndex,$onset,$confidence,$timeframe"
+                                    )
                                 }
-                                val ByteBuffer =
-                                    ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
 
-                                val inputFeature0 = TensorBuffer.createFixedSize(
-                                    intArrayOf(1, 43844, 1),
-                                    DataType.FLOAT32
+                            } else if (onset > 0.9f) {
+                                // Scenario B: TRUE NOTE SEGMENTATION
+                                // The note was already playing, but the onset head detected a sharp new hammer strike!
+                                // Cut the old note instantly and strike it again.
+                                noteTrack.insertEvent(
+                                    com.leff.midi.event.NoteOff(
+                                        tick,
+                                        channel,
+                                        pitch,
+                                        0
+                                    )
                                 )
-                                inputFeature0.loadBuffer(ByteBuffer)
-                                val outputs = model.process(inputFeature0)
-
-                                val noteFrames = outputs.outputFeature0AsTensorBuffer
-                                val rawDataNote = noteFrames.floatArray
-                                myViewModel.noteFrames = rawDataNote
-                                val onsetFrames = outputs.outputFeature1AsTensorBuffer
-                                val rawDataonset = onsetFrames.floatArray
-                                myViewModel.onsetFrames = rawDataonset
-                                val contourFrames = outputs.outputFeature2AsTensorBuffer
-                                val outputArray = noteFrames.floatArray
-                                val onsetArray = onsetFrames.floatArray
-                                Log.d("SECOND", "$timeframe")
-
+                                noteTrack.insertEvent(
+                                    com.leff.midi.event.NoteOn(
+                                        tick + 1,
+                                        channel,
+                                        pitch,
+                                        100
+                                    )
+                                )
                                 Log.d(
-                                    "MIDI_DEBUG",
-                                    "Actual model array size is: ${outputArray.size}"
+                                    "MIDI_SEGMENT",
+                                    "Segmented Re-strike Key $pianoKeyIndex at Tick $tick"
                                 )
-
-
-                                val ts = TimeSignature()
-                                ts.setTimeSignature(
-                                    4,
-                                    4,
-                                    TimeSignature.DEFAULT_METER,
-                                    TimeSignature.DEFAULT_DIVISION
-                                )
-                                val tempo = Tempo()
-                                tempo.setBpm(120f)
-                                tempoTrack.insertEvent(ts);
-                                tempoTrack.insertEvent(tempo);
-                                var seconds = 0
-                                seconds += 1
-                                val channel = 0
-
-                                for (timeIndex in 15 until 157) {
-                                    for (pianoKeyIndex in 0 until 88) {
-                                        val noteLocation = (timeIndex * 88) + pianoKeyIndex
-
-                                        val pitch = pianoKeyIndex + 22
-                                        val velocity = 100
-                                        val tick = (globalFrameIndex.toLong() * 11L)
-                                        val duration: Long = 120
-                                        // FIXED: Use noteLocation instead of just pianoKeyIndex!
-                                        val confidence = outputArray[noteLocation]
-                                        val onset = onsetArray[noteLocation]
-                                        val Level = onset * 127
-
-                                        // 1. Ensure we aren't on the very first time frame to avoid out-of-bounds errors
-                                        val isPeak = if (timeIndex > 15) {
-                                            val lastFrameLocation = noteLocation - 88
-                                            confidence - outputArray[lastFrameLocation].toDouble() > 0.16
-
-
-                                        } else {
-                                            true // On the first frame, treat it as a peak if it clears the threshold
-                                        }
-                                        val isNotPeak = if (timeIndex > 15) {
-                                            val lastFrameLocation = noteLocation - 88
-                                            confidence - outputArray[lastFrameLocation].toDouble() < -0.16
-
-
-                                        } else {
-                                            true // On the first frame, treat it as a peak if it clears the threshold
-                                        }
-                                        if (confidence > 0.5f && isPeak) {
-
-                                            if (myViewModel.pianoNotes[pianoKeyIndex].play == false) {
-                                                myViewModel.pianoNotes[pianoKeyIndex].play = true
-                                                noteTrack.insertEvent(
-                                                    com.leff.midi.event.NoteOn(
-                                                        tick,
-                                                        channel,
-                                                        pitch,
-                                                        100
-                                                    )
-                                                )
-                                                Log.d(
-                                                    "MIDI",
-                                                    " $pianoKeyIndex,$timeIndex,$onset,$confidence,$timeframe"
-                                                )
-                                            }
-
-                                        } else if (onset > 0.9f) {
-                                            // Scenario B: TRUE NOTE SEGMENTATION
-                                            // The note was already playing, but the onset head detected a sharp new hammer strike!
-                                            // Cut the old note instantly and strike it again.
-                                            noteTrack.insertEvent(
-                                                com.leff.midi.event.NoteOff(
-                                                    tick,
-                                                    channel,
-                                                    pitch,
-                                                    0
-                                                )
-                                            )
-                                            noteTrack.insertEvent(
-                                                com.leff.midi.event.NoteOn(
-                                                    tick + 1,
-                                                    channel,
-                                                    pitch,
-                                                    100
-                                                )
-                                            )
-                                            Log.d(
-                                                "MIDI_SEGMENT",
-                                                "Segmented Re-strike Key $pianoKeyIndex at Tick $tick"
-                                            )
-                                        } else {
-                                            if (myViewModel.pianoNotes[pianoKeyIndex].play == true && isNotPeak) {
-                                                myViewModel.pianoNotes[pianoKeyIndex].play = false
-                                                noteTrack.insertEvent(
-                                                    com.leff.midi.event.NoteOff(
-                                                        tick,
-                                                        channel,
-                                                        pitch,
-                                                        0
-                                                    )
-                                                )
-                                            }
-                                        }
-
-                                    }
-                                    globalFrameIndex++
+                            } else {
+                                if (pianoNotes[pianoKeyIndex].play == true && isNotPeak) {
+                                    pianoNotes[pianoKeyIndex].play = false
+                                    noteTrack.insertEvent(
+                                        com.leff.midi.event.NoteOff(
+                                            tick,
+                                            channel,
+                                            pitch,
+                                            0
+                                        )
+                                    )
                                 }
-
-
-                                pointer += step
                             }
-                            val tracks: MutableList<MidiTrack?> = ArrayList<MidiTrack?>()
-                            tracks.add(tempoTrack)
-                            tracks.add(noteTrack)
 
-                            val midi = MidiFile(MidiFile.DEFAULT_RESOLUTION, tracks)
-                            try {
-                                midi.writeToFile(myViewModel.midiFile)
-                                // SWITCH TO MAIN THREAD TO UPDATE UI SAFELY
-                                myViewModel.viewModelScope.launch(Dispatchers.Main) {
-                                    myViewModel.isMidiReady = true
-                                }
-                            } catch (e: IOException) {
-                                System.err.println(e)
-
-                            }
                         }
-                        model.close()
-                        myViewModel.everythingReady = true
-
-
-                    } catch (e: IOException) {
-                        Log.e("MIDI_CONVERT", "Processing error", e)
+                        globalFrameIndex++
                     }
 
-                }
 
+                    pointer += step
+                }
+                val tracks: MutableList<MidiTrack?> = ArrayList<MidiTrack?>()
+                tracks.add(tempoTrack)
+                tracks.add(noteTrack)
+
+                val midi = MidiFile(MidiFile.DEFAULT_RESOLUTION, tracks)
+                try {
+                    midi.writeToFile(myViewModel.midiFile)
+                    // SWITCH TO MAIN THREAD TO UPDATE UI SAFELY
+                    myViewModel.viewModelScope.launch(Dispatchers.Main) {
+                        myViewModel.isMidiReady = true
+                    }
+                } catch (e: IOException) {
+                    System.err.println(e)
+
+                }
+            }
+            model.close()
+
+            myViewModel.everythingReady = true
+
+
+
+        } catch (e: IOException) {
+            Log.e("MIDI_CONVERT", "Processing error", e)
+        }
 
     }
+
+
+}
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -543,72 +682,77 @@ class MainActivity : ComponentActivity() {
 
         setContent {
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Greeting(viewModel = myViewModel)
-                    convertButton(viewModel = myViewModel,cpp = cppviewmodel)
-                    createMidi(viewModel = myViewModel)
-                    TransformScale(viewModel = myViewModel,cpp = cppviewmodel)
-                    try {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                main(cpp = cppviewmodel)
+                myViewModel.drawPiano()
+                Greeting(viewModel = myViewModel)
+                convertButton(viewModel = myViewModel,cpp = cppviewmodel)
+                createMidi(viewModel = myViewModel)
+                TransformScale(viewModel = myViewModel,cpp = cppviewmodel)
+                try {
 
 
-                        // play it, save it, show it
-                    } catch (e: Exception) {
+                    // play it, save it, show it
+                } catch (e: Exception) {
 
 
 
-                    }
-
-            }
-        }
-    }
-
-
-@Composable
-fun Greeting(viewModel: converter) {
-    if(!viewModel.everythingReady) {
-        viewModel.fallingNoteCount.clear()
-        val state = rememberTextFieldState()
-        OutlinedTextField(
-            value = viewModel.url,
-            onValueChange = { newValue ->
-                viewModel.url = newValue // Update the ViewModel when the user types
-            },
-            singleLine = true,
-            label = { Text("Paste a TikTok link") })
-
-    }
-}
-
-@Composable
-fun convertButton(viewModel: converter,cpp: cpp) {
-    if (!viewModel.everythingReady) {
-
-
-        val scope = rememberCoroutineScope()
-        val context = LocalContext.current
-        Button(onClick = {
-            scope.launch {
-
-                cpp.play();
-                viewModel.isAdvanced=true
-                viewModel.saveFileData(context,viewModel)
-
-
+                }
 
             }
         }
-        ) {
-            Text(text = "Convert")
+    }
+
+
+    @Composable
+    fun Greeting(viewModel: converter) {
+        if(!viewModel.everythingReady) {
+
+            viewModel.fallingNoteCount.clear()
+            val state = rememberTextFieldState()
+            OutlinedTextField(
+
+                value = viewModel.url,
+                onValueChange = { newValue ->
+                    viewModel.url = newValue // Update the ViewModel when the user types
+                },
+                singleLine = true,
+                label = { Text("Paste a TikTok link") })
+
+        } else {viewModel.url=""}
+    }
+
+    @Composable
+    fun convertButton(viewModel: converter,cpp: cpp) {
+        if (!viewModel.everythingReady) {
+
+
+            val scope = rememberCoroutineScope()
+            val context = LocalContext.current
+            Button(onClick = {
+                scope.launch {
+                    cpp.play(900,10)
+                    viewModel.isAdvanced=true
+                    viewModel.saveFileData(context,viewModel)
+
+
+
+                }
+            }
+            ) {
+                Text(text = "Convert")
+            }
+            Text(text = "here be debug")
         }
     }
-}
+
     @Composable
     fun advancedButton(viewModel: converter) {
         if (!viewModel.everythingReady) {
@@ -628,353 +772,380 @@ fun convertButton(viewModel: converter,cpp: cpp) {
         }
     }
 
-fun createMidi(viewModel: converter) {
+    fun createMidi(viewModel: converter) {
 
 
-}
-// Delta time is 0, so it starts immediately
-@Composable
-fun TransformScale(viewModel: converter,cpp: cpp
-
-) {
-    cpp.sequencer(false); Int
- 
-
-    var savedScale by remember { mutableStateOf(true) }
-    var scaleX by remember { mutableFloatStateOf(1.0f) }
-
-    var scaleY by remember { mutableFloatStateOf(1.0f) }
-    val currentDensity = LocalDensity.current
-
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    var finger1Position by remember { mutableStateOf<Offset?>(null) }
-    var finger2Position by remember { mutableStateOf<Offset?>(null) }
-    var fingerVector by remember { mutableStateOf(Offset.Zero) }
-
-    val state = rememberTransformableState { zoomChange, offsetChange, rotationChange ->
-        if (savedScale) {
-            scaleX = (scaleX * zoomChange).coerceIn(0.1f, 10.0f)
-        } else {
-            scaleY = (scaleY * zoomChange).coerceIn(0.5f, 5.0f)
-        }
-        offset += offsetChange
     }
+    // Delta time is 0, so it starts immediately
+    @Composable
+    fun TransformScale(viewModel: converter,cpp: cpp
 
-    var currentSize by remember { mutableStateOf(0) }
+    ) {
 
 
-    var touchX by remember { mutableStateOf(currentSize.toFloat()) }
-    var touchY by remember { mutableStateOf(currentSize.toFloat()) }
-    val density = LocalDensity.current
-    var isPlaying by remember { mutableStateOf(false) }
-    val animate = remember { Animatable(0f) }
-    var sliderVal by remember { mutableFloatStateOf(animate.value) }
+        var savedScale by remember { mutableStateOf(true) }
+        var scaleX by remember { mutableFloatStateOf(1.0f) }
 
-    if (viewModel.everythingReady) {
-        LaunchedEffect(animate.value) {
-            sliderVal = animate.value
-        }
-        LaunchedEffect(isPlaying) {
-            if (isPlaying) {
-                animate.snapTo(sliderVal)
-                animate.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(durationMillis = 480 * 120, easing = LinearEasing)
-                )
-            }
-        }
+        var scaleY by remember { mutableFloatStateOf(1.0f) }
+        val currentDensity = LocalDensity.current
 
-        Slider(
-            value = sliderVal,
-            onValueChange = { sliderVal = it },
-            modifier = Modifier.size(400.dp, 10.dp)
-                .zIndex(1f)
-        )
-        FilledIconButton(
-            onClick = { isPlaying = !isPlaying },
-            modifier = Modifier.size(64.dp).zIndex(1f)
-        ) {
-            if (!isPlaying) {
-                Icon(painter = painterResource(id = R.drawable.baseline_play_arrow_24), "hi")
+        var offset by remember { mutableStateOf(Offset.Zero) }
+        var finger1Position by remember { mutableStateOf<Offset?>(null) }
+        var finger2Position by remember { mutableStateOf<Offset?>(null) }
+        var fingerVector by remember { mutableStateOf(Offset.Zero) }
+
+        val state = rememberTransformableState { zoomChange, offsetChange, rotationChange ->
+            if (savedScale) {
+                scaleX = (scaleX * zoomChange).coerceIn(0.1f, 10.0f)
             } else {
-                Icon(painter = painterResource(id = R.drawable.baseline_pause_24), "hi")
+                scaleY = (scaleY * zoomChange).coerceIn(0.5f, 5.0f)
             }
+            offset += offsetChange
         }
-        FilledIconButton(
-            onClick = { viewModel.everythingReady = false },
-            modifier = Modifier.size(64.dp).zIndex(1f)
-        ) {
-            Icon(painter = painterResource(id = R.drawable.baseline_cancel_24), "hi")
 
+        var currentSize by remember { mutableStateOf(0) }
+        val horizontalBrush = Brush.linearGradient(
+            0.0f to Color.Black,
+            0.5f to Color.Black, // Sharp cut-off right at the middle
+            0.5f to Color.Gray,
+            1.0f to Color.Gray,
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, 0f) // Forces the flow across the X-axis (left to right)
+        )
+        val playedBrush = Brush.linearGradient(
+            0.0f to Color(0xFF1565C0),
+            0.5f to Color(0xFF1565C0), // dark blue, Sharp cut-off right at the middle
+            0.5f to Color.Gray,
+            1.0f to Color.Gray,
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, 0f) // Forces the flow across the X-axis (left to right)
+        )
+
+        var touchX by remember { mutableStateOf(currentSize.toFloat()) }
+        var touchY by remember { mutableStateOf(currentSize.toFloat()) }
+        val density = LocalDensity.current
+        var isPlaying by remember { mutableStateOf(false) }
+        val animate = remember { Animatable(0f) }
+        var sliderVal by remember { mutableFloatStateOf(animate.value) }
+        var initialLastVal = viewModel.convertedLastVal
+        LaunchedEffect(!isPlaying) {
+            initialLastVal =
+                ((viewModel.convertedLastVal + 1000) * (1 - sliderVal)).toInt() //relative time
         }
-        var convertedVal = viewModel.convertedLastVal / 10 * sliderVal
+        if (viewModel.everythingReady) {
+            LaunchedEffect(animate.value) {
+                sliderVal = animate.value
+            }
+            LaunchedEffect(isPlaying) {
+                if (isPlaying) {
+                    animate.snapTo(sliderVal)
+                    animate.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = ((initialLastVal+1000)/960)*1000, easing = LinearEasing) //divides 960 into 1 and times 1000 also the other 1000 is the silent headroom
+                    )
+                }
+            }
 
-        Box(
-            modifier = Modifier
-                .pointerInput(Unit)
-                {
-                    awaitEachGesture {
-                        var prevPositions: List<Offset>? = null
-                        while (true) {
-                            val event = awaitPointerEvent()
+            Slider(
+                value = sliderVal,
+                onValueChange = { sliderVal = it },
+                modifier = Modifier.size(400.dp, 10.dp)
+                    .zIndex(1f)
+            )
+            FilledIconButton(
+                onClick = { isPlaying = !isPlaying },
+                modifier = Modifier.size(64.dp).zIndex(1f)
+            ) {
+                if (!isPlaying) {
+                    isPlaying = isPlaying
 
-                            val activePointers = event.changes.filter { it.pressed }
+                    Icon(painter = painterResource(id = R.drawable.baseline_play_arrow_24), "hi")
+                } else {
 
-                            if (activePointers.size > 1) {
+                    Icon(painter = painterResource(id = R.drawable.baseline_pause_24), "hi")
+                }
+            }
+            FilledIconButton(
+                onClick = { viewModel.everythingReady = false },
+                modifier = Modifier.size(64.dp).zIndex(1f)
+            ) {
+                Icon(painter = painterResource(id = R.drawable.baseline_cancel_24), "hi")
 
-                                val x1 = activePointers[0].position.x
-                                val x2 = activePointers[1].position.x
+            }
 
-                                val y1 = activePointers[0].position.y
-                                val y2 = activePointers[1].position.y
-                                fingerVector = Offset(
-                                    x = kotlin.math.abs(x2 - x1),
-                                    y = kotlin.math.abs(y2 - y1)
-                                )
-                                val prev = prevPositions
-                            } else if (activePointers.size == 1) {
-                                // 2. SAFE SINGLE-TOUCH MODE (Only fires if exactly one finger is down)
-                                val x1 = activePointers[0].position.x
-                                val y1 = activePointers[0].position.y
+            var convertedVal = (viewModel.convertedLastVal+1000) * sliderVal//decides how long to reach the final note based on slider 0 to 1 speed
+            Log.d("converted",viewModel.convertedLastVal.toString())
 
-                                // Put your playhead dragging/scrolling math here
-                            } else {
-                                // 3. SAFE IDLE MODE (Fires when fingers are lifted completely)
-                                // Do nothing or reset your touch flags here so it doesn't crash!
-                            }
-                            if (fingerVector.x > fingerVector.y) {
-                                savedScale = true
+            Box(
+                modifier = Modifier
+                    .pointerInput(Unit)
+                    {
+                        awaitEachGesture {
+                            var prevPositions: List<Offset>? = null
+                            while (true) {
+                                val event = awaitPointerEvent()
 
-                            } else {
-                                savedScale = false
+                                val activePointers = event.changes.filter { it.pressed }
+
+                                if (activePointers.size > 1) {
+
+                                    val x1 = activePointers[0].position.x
+                                    val x2 = activePointers[1].position.x
+
+                                    val y1 = activePointers[0].position.y
+                                    val y2 = activePointers[1].position.y
+                                    fingerVector = Offset(
+                                        x = kotlin.math.abs(x2 - x1),
+                                        y = kotlin.math.abs(y2 - y1)
+                                    )
+                                    val prev = prevPositions
+                                } else if (activePointers.size == 1) {
+                                    // 2. SAFE SINGLE-TOUCH MODE (Only fires if exactly one finger is down)
+                                    val x1 = activePointers[0].position.x
+                                    val y1 = activePointers[0].position.y
+
+                                    // Put your playhead dragging/scrolling math here
+                                } else {
+                                    // 3. SAFE IDLE MODE (Fires when fingers are lifted completely)
+                                    // Do nothing or reset your touch flags here so it doesn't crash!
+                                }
+                                if (fingerVector.x > fingerVector.y) {
+                                    savedScale = true
+
+                                } else {
+                                    savedScale = false
 
 
+                                }
                             }
                         }
                     }
-                }
 
-                .graphicsLayer {
+                    .graphicsLayer {
 
-                    this.scaleX = scaleX
-                    this.scaleY = scaleY
+                        this.scaleX = scaleX
+                        this.scaleY = scaleY
 
-                    // 2. Set your translation shifts cleanly inside the block boundary
-                    this.translationX = offset.x
-                    this.translationY = offset.y
-                }
-                .transformable(state = state)
-                .requiredSize(440.dp, 600.dp)
-                .background(Color.Black) // Dark background for a DAW look
-
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
+                        // 2. Set your translation shifts cleanly inside the block boundary
+                        this.translationX = offset.x
+                        this.translationY = offset.y
+                    }
+                    .transformable(state = state)
+                    .requiredSize(440.dp, 600.dp)
+                    .background(Color.Black) // Dark background for a DAW look
 
             ) {
-                var offset = 10
-                var keyCount = 0
                 Box(
                     Modifier
-                        .size(5.dp, 50.dp)
-                        .offset(x = 0.dp)
-                        .background(Color.White)
-                )
-                Box(
-                    Modifier
-                        .size(2.dp, 50.dp)
-                        .offset(x = 5.dp)
-                        .background(Color.Red)
-                )
-                Box(
-                    Modifier
-                        .size(5.dp, 50.dp)
-                        .offset(x = 10.dp)
-                        .background(Color.White)
-                )
-                for (o in 1..7) { //octave
-                    for (k in 1..2) { //key groups
-                        keyCount += 1
-                        offset += 5
-                        viewModel.itemCount.add(pianoNote(false, offset, 1))
-                        Box(
-                            Modifier
-                                .size(5.dp, 50.dp)
-                                .offset(x = viewModel.itemCount[keyCount - 1].offset!!.dp)
-                                .background(Color.White)
-                        )
-                        offset += 5
-                        keyCount += 1
-                        viewModel.itemCount.add(pianoNote(true, offset, keyCount))
-                        Box(
-                            Modifier
-                                .size(2.dp, 50.dp)
-                                .offset(x = viewModel.itemCount[keyCount - 1].offset!!.dp)
-                                .background(Color.Red)
-                                .zIndex(1f)
-                        )
-                    }
-                    offset += 5
-                    viewModel.itemCount.add(pianoNote(true, offset, keyCount))
-                    keyCount += 1
-                    Box(
-                        Modifier
-                            .size(5.dp, 50.dp)
-                            .offset(x = viewModel.itemCount[keyCount - 1].offset!!.dp)
-                            .background(Color.White)
-                    )
-                    for (k in 0..2) {
-
-                        keyCount += 1
-                        offset += 5
-                        viewModel.itemCount.add(pianoNote(true, offset, keyCount))
-                        Box(
-                            Modifier
-                                .size(5.dp, 50.dp)
-                                .offset(x = viewModel.itemCount[keyCount - 1].offset!!.dp)
-                                .background(Color.White)
-                        )
-                        offset += 5
-                        keyCount += 1
-                        viewModel.itemCount.add(pianoNote(false, offset, keyCount))
-                        Box(
-                            Modifier
-                                .size(2.dp, 50.dp)
-                                .offset(x = viewModel.itemCount[keyCount - 1].offset!!.dp)
-                                .background(Color.Red)
-                                .zIndex(1f)
-                        )
-                    }
-                    offset += 5
-                    viewModel.itemCount.add(pianoNote(true, offset, keyCount))
-                    keyCount += 1
-
-                    Box(
-                        Modifier
-                            .size(5.dp, 50.dp)
-                            .offset(x = viewModel.itemCount[keyCount - 1].offset!!.dp)
-                            .background(Color.White)
-
-                    )
-
-                }
-                Box(
-                    Modifier
-                        .size(5.dp, 50.dp)
-                        .offset(x = 435.dp)
-                        .background(Color.White)
-                )
-                LaunchedEffect(viewModel.midiFile) {
-                    withContext(Dispatchers.IO) {
-
-                        val midi = MidiFile(viewModel.midiFile)
-                        midi.tracks.forEach { track ->
-
-                            track.events.forEach { event ->
-                                when (event) {
-                                    is com.leff.midi.event.NoteOn -> {
-                                        withContext(Dispatchers.Main) {
-
-
-                                            val pitch = event.getNoteValue()
-                                            val tick = event.getTick()
-
-                                            Log.d("etet", "$tick")
-                                            viewModel.fallingNoteCount.add(
-                                                fallingNote(
-                                                    pitch,
-                                                    tick
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-
-                            }
-                        }
-                        val f = viewModel.fallingNoteCount
-                        Log.d(
-                            "soo",
-                            " $f"
-                        )
-                        viewModel.convertedLastVal =
-                            viewModel.fallingNoteCount[viewModel.fallingNoteCount.size - 1].time!!.toInt()
-                    }
-
-                }
-                val seen = mutableSetOf<Int>(
-                    2,
-                    5,
-                    9,
-                    12,
-                    16,
-                    19,
-                    23,
-                    26,
-                    30,
-                    33,
-                    37,
-                    40,
-                    44,
-                    47,
-                    51,
-                    54,
-                    58,
-                    61,
-                    65,
-                    68,
-                    72
-                )
-                Box(
-                    Modifier.offset(y = convertedVal!!.toInt().dp)
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
 
                 ) {
+                    for (o in viewModel.itemCount.indices) { //work
+                        key(o) {
 
-                    for (i in 1..viewModel.fallingNoteCount.size) {
-                        key(i) {
-                            val trueOffset = viewModel.fallingNoteCount[i - 1].note!! * 5 - 21 * 5
-                            val trueOffsetY = viewModel.fallingNoteCount[i - 1].time!! / 10
-                            val playChecker=trueOffsetY-convertedVal
-                            if (i==7) {
-                                Log.d("slideryy", "${trueOffsetY - convertedVal}")
-                                if (playChecker.toInt() == 0) {
-                                    cpp.play();
-                                }
-                            }
                             Box(
                                 Modifier
-                                    .size(5.dp, 5.dp)
-                                    .offset(x = trueOffset.dp, y = -trueOffsetY.toInt().dp)
-                                    .background(Color.Red)
+                                    .size(5.dp, 50.dp)
+                                    .offset(x = viewModel.itemCount[o].offset!!.dp)
+                                    .background(
+                                        if (viewModel.itemCount[o].isWhite!! == true) {
+                                            if (viewModel.itemCount[o].play!! == false) {
+                                                SolidColor(Color.White)
+                                            } else {
+                                                SolidColor(Color(0xFF4FC3F7))
+
+                                            }
+                                        } else {
+                                            if (viewModel.itemCount[o].play!! == false) {
+                                                horizontalBrush
+                                            } else {
+                                                playedBrush
+                                            }
+
+                                        }
+                                    )
+                                    .zIndex(2f)
+
                             )
                         }
                     }
-                }
 
-                for (i in 1..2) {
+                    LaunchedEffect(viewModel.midiFile) { //turns on once
+                        withContext(Dispatchers.IO) {
+                            Log.e("check2", sliderVal.toString())
+                            val midi = MidiFile(viewModel.midiFile)
+                            val unsortedNotes = mutableListOf<fallingNote>()
+                            midi.tracks.forEach { track ->
 
+                                track.events.forEach { event ->
+                                    when (event) {
+                                        is com.leff.midi.event.NoteOn -> {
+                                            withContext(Dispatchers.Main) {
+                                                val level = event.velocity
+                                                val pitch = event.getNoteValue()
+                                                val tick = event.getTick()
 
-                    if (i !in seen) {
-                        Box(
-                            Modifier
-                                .offset(x = offset.dp)
+                                                Log.d("etet", "$tick")
+                                                unsortedNotes.add(
+                                                    fallingNote(
+                                                        note=pitch,
+                                                        time=tick,
+                                                        level=level
+                                                    )
+                                                )
+                                            }
+                                        }
 
-                                .size(10.dp, 35.dp)
-                                .background(Color.Gray) // Changed to Gray just to differentiate layers
-                        )
-                    } else {
-                        Box(
-                            Modifier
-                                .offset(x = 15.dp)
+                                    }
 
-                                .size(10.dp, 35.dp)
+                                }
+                            }
+                            unsortedNotes.sortBy { it.time }
+                            viewModel.fallingNoteCount.addAll(unsortedNotes)
 
-                        )
+                            val f = viewModel.fallingNoteCount
+                            Log.d(
+                                "soo",
+                                " $f"
+                            )
+                            viewModel.convertedLastVal =
+                                viewModel.fallingNoteCount[viewModel.fallingNoteCount.size - 1].time!!.toInt() //calculates total time from last notes time
+                            Log.d(
+                                "soo",
+                                " ${viewModel.convertedLastVal}"
+                            )
+                        }
+
                     }
-                } // <-- Close Row 2
+                    //wotks
+                    val seen = mutableSetOf<Int>(
+                        2,
+                        5,
+                        9,
+                        12,
+                        16,
+                        19,
+                        23,
+                        26,
+                        30,
+                        33,
+                        37,
+                        40,
+                        44,
+                        47,
+                        51,
+                        54,
+                        58,
+                        61,
+                        65,
+                        68,
+                        72
+                    )
+                    LaunchedEffect(isPlaying) {
+                        snapshotFlow { sliderVal }
+                            .collectLatest { currentSliderVal ->
+                                Log.e("check2", currentSliderVal.toString())
+                                val currentPlayhead = (viewModel.convertedLastVal + 1000) * currentSliderVal / speed.toFloat() //playhead location
+                                val keysThatShouldBePlaying = BooleanArray(88)
+                                for (n in viewModel.fallingNoteCount.indices) { //redraws every note then checks
+                                    val note = viewModel.fallingNoteCount[n] //
+
+                                    val pianoKeyIndex = note.note!! - 21
+                                    if (note.note == null) continue
+                                    if (pianoKeyIndex < 0 || pianoKeyIndex >= viewModel.itemCount.size) {
+                                        continue // Skip this note, it's too high or too low for the keyboard
+                                    }
+                                    val trueOffsetY =
+                                        viewModel.fallingNoteCount[n].time!! / speed // note offset nothing with speed
+
+
+                                    val playChecker = trueOffsetY - currentPlayhead
+
+
+                                    if (playChecker < -10f) {
+
+                                        continue
+                                    }
+
+                                    if (playChecker > 10f) {
+
+                                        break
+                                    }
+                                    if (playChecker in -5f..5f) {
+
+                                        keysThatShouldBePlaying[pianoKeyIndex] = true //data note
+                                    }
+                                        else { keysThatShouldBePlaying[pianoKeyIndex] = false }
+
+
+                                }
+                                for(i in keysThatShouldBePlaying.indices){ //88
+                                    if ( keysThatShouldBePlaying[i] == true) { //check if played
+                                            //plays/changes color only if false
+                                            if  (viewModel.itemCount[i].play == false)
+                                            {
+                                                viewModel.itemCount[i] = viewModel.itemCount[i].copy(play = true) //color
+                                            cpp.play(
+                                                i!!,
+                                                1!! //not supported currently
+                                            );
+
+                                            }
+
+                                        } else {
+                                            viewModel.itemCount[i] = viewModel.itemCount[i].copy(play = false) //turn the color off
+                                        }
+
+
+
+
+                                }
+
+                            }
+                    }
+                    Box( //box filled with notes speed
+                        Modifier.offset(y = (convertedVal!!/speed).toInt().dp)
+
+
+                    ) {
+
+                        for (i in 1..viewModel.fallingNoteCount.size) { //falling notes
+                            key(i) {
+                                val trueOffset =
+                                    viewModel.fallingNoteCount[i - 1].note!! * 5 - 21 * 5
+                                val trueOffsetY =
+                                    viewModel.fallingNoteCount[i - 1].time!! / speed // note offset nothing with speed
+
+                                val endVal = trueOffsetY + 9
+                                val endChecker = endVal - convertedVal / speed //speed
+
+
+                                Log.d("slideryy", "${trueOffsetY - convertedVal / 10}")
+
+                                Log.d("converted1", sliderVal.toString())
+                                Box(
+                                    Modifier
+                                        .size(5.dp, 5.dp)
+                                        .offset(x = trueOffset.dp, y = -trueOffsetY.toInt().dp)
+                                        .background(
+                                            if (viewModel.itemCount[viewModel.fallingNoteCount[i - 1].note!! - 21].isWhite == true) {
+                                                Color(0xFF4FC3F7)
+                                            } else {
+                                                Color(0xFF1565C0)
+                                            }
+                                        )
+                                        .zIndex(0f)
+                                )
+
+                            }
+                        }
+                        }
+
+                    }
+
+
+                }
             }
         }
     }
-}}

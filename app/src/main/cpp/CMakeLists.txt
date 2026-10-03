@@ -36,3 +36,9 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     # List libraries link to the target library
     android
     log)
+
+# Specifies libraries CMake should link to your target library.
+# This correctly links both 'android' and 'log' to your 'sequencer' library.
+target_link_libraries(${CMAKE_PROJECT_NAME}
+        android
+        log)
