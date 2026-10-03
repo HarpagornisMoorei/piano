@@ -243,6 +243,7 @@ class Transcriber(
 class cpp(): ViewModel(){
     external fun sequencer(isPlaying: Boolean): Int
     external fun play(freq: Int, level: Int): Int
+    external fun release(key: Int): Int
 
     companion object {
         init {
@@ -1094,6 +1095,7 @@ class MainActivity : ComponentActivity() {
                                             }
 
                                         } else {
+                                            if (viewModel.itemCount[i].play == true) cpp.release(i) //key up: damper
                                             viewModel.itemCount[i] = viewModel.itemCount[i].copy(play = false) //turn the color off
                                         }
 
