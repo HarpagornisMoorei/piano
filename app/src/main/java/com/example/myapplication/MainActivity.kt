@@ -160,7 +160,7 @@ fun dumpMidi(file: File) {
 }
 class advancedCon : ViewModel(){
     private val spaceUrl:String="https://qx32account-midiapp.hf.space"
-    private val hfToken: String?="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"
+    private val hfToken: String?=
     private val client= OkHttpClient.Builder()
         .readTimeout(0,TimeUnit.SECONDS)
         .build()
