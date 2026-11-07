@@ -103,6 +103,9 @@ import org.json.JSONObject
 import okhttp3.RequestBody
 import androidx.lifecycle.lifecycleScope
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
@@ -110,6 +113,12 @@ import kotlin.Boolean
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collectLatest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.R.attr.onClick
+import androidx.core.content.ContextCompat
+import android.Manifest
+import android.content.pm.PackageManager
 fun main(cpp: cpp){
     cpp.sequencer(false); Int
 }
@@ -149,6 +158,7 @@ val pianoNotes =mutableStateListOf<Note>().apply {
         play = false,
         music = false
     ) })}
+
 fun dumpMidi(file: File) {
     val midi = file.inputStream().use { MidiFile(it) }
     Log.d("midiifo","PPQN=${midi.resolution}  format=${midi.type}  tracks=${midi.tracks.size}")
@@ -158,10 +168,33 @@ fun dumpMidi(file: File) {
         }
     }
 }
+class app : Application(){
+    override fun onCreate() { //when user starts app
+        super.onCreate()
+        createNotificationChannel()
+    }
+
+    private fun createNotificationChannel() {
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { //IF GREATER THAN OREO
+            val channel = NotificationChannel( //SET UP the channel
+                NotificationService.CHANNEL_ID, //ID
+                "COUNTER",
+                NotificationManager.IMPORTANCE_HIGH
+
+
+            )
+            channel.description= "finished conversion"
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager //Tell notificationmanager to create the channel
+            notificationManager.createNotificationChannel(channel)
+
+        }
+
+    }
+}
 class advancedCon : ViewModel(){
     private val spaceUrl:String="https://qx32account-midiapp.hf.space"
-    private val hfToken: String?=
-    private val client= OkHttpClient.Builder()
+    private val hfToken: String?=""
+        private val client= OkHttpClient.Builder()
         .readTimeout(0,TimeUnit.SECONDS)
         .build()
     private fun Request.Builder.auth()=apply{hfToken?.let{header("Authorization", "Bearer $it")}}
@@ -243,6 +276,7 @@ class Transcriber(
 class cpp(): ViewModel(){
     external fun sequencer(isPlaying: Boolean): Int
     external fun play(freq: Int, level: Int): Int
+    external fun release(key: Int): Int
 
     companion object {
         init {
@@ -252,8 +286,8 @@ class cpp(): ViewModel(){
 }
 class converter(application: Application) : AndroidViewModel(application) {
     var url by mutableStateOf("")
+    var debug by mutableStateOf("debug")
     var isAdvanced by mutableStateOf(false)
-
     // 2. Android safely encodes the symbols so the API can read it seamlessly
     var isMidiReady by mutableStateOf(false)
     val encodedUrl by derivedStateOf { Uri.encode(url) }
@@ -387,7 +421,7 @@ class converter(application: Application) : AndroidViewModel(application) {
 
     suspend fun saveFileData(context: Context,myViewModel: converter) {
         Log.d("savings", "$url")
-        Log.d("savings", "$finalApiUrl")
+        debug="requesting: $url"
         val mapper = jacksonObjectMapper()
         val okHttpClient = OkHttpClient() //core class
 
@@ -407,7 +441,7 @@ class converter(application: Application) : AndroidViewModel(application) {
             val trueLink = readJson.data?.music
 
             if (!trueLink.isNullOrEmpty()) {
-                Log.d("https", "link recieved")
+                debug="$url recieved"
                 val requestVideo = Request.Builder()
                     .url(trueLink)
                     .build()
@@ -427,6 +461,7 @@ class converter(application: Application) : AndroidViewModel(application) {
                 val imageFilePath = imageFile.toURI().toString()
                 val fos = FileOutputStream(imageFile)
                 Log.d("https", "downloaded")
+                debug="downloading: $url"
                 fos.write(inputStream?.readBytes())
                 fos.flush()
                 fos.close() //dnc
@@ -438,8 +473,8 @@ class converter(application: Application) : AndroidViewModel(application) {
 
                                 simpleConvert(context, myViewModel)
                             } else {
-                                Log.d("debugh", "done")
-                                advancedConvert(context.cacheDir, myViewModel)
+                                debug="downloaded: $url"
+                                advancedConvert(context.cacheDir, myViewModel,context)
                             }
                         }
                     }
@@ -447,9 +482,8 @@ class converter(application: Application) : AndroidViewModel(application) {
         }
 
     }}
-suspend fun advancedConvert(cacheDir: File,myViewModel: converter) = withContext(Dispatchers.IO) {
-    Log.d("debugh", "done")
-
+suspend fun advancedConvert(cacheDir: File,myViewModel: converter, context: Context, ) = withContext(Dispatchers.IO) {
+    myViewModel.debug="Converting wav to midi... This might take a while"
 
     try {
         val client= advancedCon()
@@ -465,9 +499,14 @@ suspend fun advancedConvert(cacheDir: File,myViewModel: converter) = withContext
             myViewModel.everythingReady = true
             Log.d("debugh", "ready")
             dumpMidi(myViewModel.midiFile)
+            myViewModel.debug="finished!"
+
+            val service = NotificationService(context.applicationContext)
+            service.SHOWNOTIFICATION()
         }
     } catch (e: Exception) {
         Log.e("MIDI_CONVERT", "Advanced conversion failed", e)
+        myViewModel.debug="Conversion failed, please reset the app"
     }
 }
 fun simpleConvert(context: Context,myViewModel: converter) {
@@ -696,6 +735,7 @@ class MainActivity : ComponentActivity() {
                 convertButton(viewModel = myViewModel,cpp = cppviewmodel)
                 createMidi(viewModel = myViewModel)
                 TransformScale(viewModel = myViewModel,cpp = cppviewmodel)
+                notification(viewModel =myViewModel)
                 try {
 
 
@@ -710,7 +750,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Composable
+    fun notification(viewModel: converter){
 
+        val context = LocalContext.current
+        val permissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) {
+                // Permission granted, you can now send notifications.
+            } else {
+                // Permission denied, handle accordingly.
+            }
+        }
+
+        if(viewModel.debug=="Converting wav to midi... This might take a while") {
+            Button(onClick = {
+                val isGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+
+                Log.d("NotifDebug", "Is permission already granted? $isGranted")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    Log.d("NotifDebug", "Android 13+ detected. Launching permission...")
+                    permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }) {
+                Text("want to be notified when its finished?")
+            }
+        }
+
+    }
     @Composable
     fun Greeting(viewModel: converter) {
         if(!viewModel.everythingReady) {
@@ -749,7 +820,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 Text(text = "Convert")
             }
-            Text(text = "here be debug")
+            Text(text = viewModel.debug)
         }
     }
 
@@ -1076,33 +1147,37 @@ class MainActivity : ComponentActivity() {
 
                                         keysThatShouldBePlaying[pianoKeyIndex] = true //data note
                                     }
-                                        else { keysThatShouldBePlaying[pianoKeyIndex] = false }
+                                    else { keysThatShouldBePlaying[pianoKeyIndex] = false }
 
 
                                 }
-                                for(i in keysThatShouldBePlaying.indices){ //88
-                                    if ( keysThatShouldBePlaying[i] == true) { //check if played
+
+                                    for (i in keysThatShouldBePlaying.indices) { //88
+                                        if (keysThatShouldBePlaying[i] == true) { //check if played
                                             //plays/changes color only if false
-                                            if  (viewModel.itemCount[i].play == false)
-                                            {
-                                                viewModel.itemCount[i] = viewModel.itemCount[i].copy(play = true) //color
-                                            cpp.play(
-                                                i!!,
-                                                1!! //not supported currently
-                                            );
+                                            if (viewModel.itemCount[i].play == false) {
+                                                viewModel.itemCount[i] =
+                                                    viewModel.itemCount[i].copy(play = true) //color
+                                                if(isPlaying) {
+                                                    cpp.play(
+                                                        i!!,
+                                                        1!! //not supported currently
+                                                    );
+                                                }
 
                                             }
 
                                         } else {
-                                            viewModel.itemCount[i] = viewModel.itemCount[i].copy(play = false) //turn the color off
+                                            if (viewModel.itemCount[i].play == true) cpp.release(i) //key up: damper
+                                            viewModel.itemCount[i] =
+                                                viewModel.itemCount[i].copy(play = false) //turn the color off
                                         }
 
 
-
-
+                                    }
                                 }
 
-                            }
+
                     }
                     Box( //box filled with notes speed
                         Modifier.offset(y = (convertedVal!!/speed).toInt().dp)
@@ -1140,12 +1215,12 @@ class MainActivity : ComponentActivity() {
 
                             }
                         }
-                        }
-
                     }
 
-
                 }
+
+
             }
         }
     }
+}
