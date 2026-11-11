@@ -1196,9 +1196,6 @@ class MainActivity : ComponentActivity() {
                                 val endChecker = endVal - convertedVal / speed //speed
 
 
-                                Log.d("slideryy", "${trueOffsetY - convertedVal / 10}")
-
-                                Log.d("converted1", sliderVal.toString())
                                 Box(
                                     Modifier
                                         .size(5.dp, 5.dp)
